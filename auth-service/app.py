@@ -24,11 +24,24 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-i
 app.config['JWT_SECRET'] = os.environ.get('JWT_SECRET', 'jwt-secret-change-in-production')
 app.config['JWT_EXPIRATION_HOURS'] = 8
 
-# CORS configurazione
+# 🔧 FIX: CORS configurato per accettare richieste da più origini
+# In produzione, permetti richieste dal backend Node.js e dal frontend
+frontend_url = os.environ.get('FRONTEND_URL', '*')
+backend_url = os.environ.get('BACKEND_URL', '')  # URL del backend Node.js
+
+# Costruisci lista origini permesse
+origins = [frontend_url]
+if backend_url and backend_url != frontend_url:
+    origins.append(backend_url)
+if '*' not in origins:
+    origins.append('*')  # Fallback per sicurezza
+
 CORS(app, resources={
     r"/api/*": {
-        "origins": os.environ.get('FRONTEND_URL', '*').split(','),
-        "supports_credentials": True
+        "origins": origins,
+        "supports_credentials": True,
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
     }
 })
 
@@ -380,5 +393,6 @@ if __name__ == '__main__':
     
     print(f"🚀 Auth Service avviato su porta {port}")
     print(f"📁 Debug mode: {debug}")
+    print(f"🔒 CORS origins: {origins}")
     
     app.run(host='0.0.0.0', port=port, debug=debug)
