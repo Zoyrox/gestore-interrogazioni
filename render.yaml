@@ -1,0 +1,39 @@
+# ============================================
+# GESTORE INTERROGAZIONI - Configurazione Render
+# ============================================
+
+services:
+  # Database PostgreSQL
+  - type: pserv
+    name: gestore-interrogazioni-db
+    runtime: docker
+    plan: free
+    env: postgres
+    disk:
+      name: data
+      mountPath: /var/lib/postgresql/data
+      sizeGB: 1
+
+  # Backend + Frontend (unico servizio)
+  - type: web
+    name: gestore-interrogazioni
+    runtime: node
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gestore-interrogazioni-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PORT
+        value: 10000
+      - key: ADMIN_USERNAME
+        value: admin
+      # Genera hash con: node -e "console.log(require('bcrypt').hashSync('tua-password', 10))"
+      - key: ADMIN_PASSWORD_HASH
+        sync: false  # Imposta manualmente nel dashboard
