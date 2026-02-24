@@ -38,8 +38,10 @@ app.use(helmet({
   },
 }));
 
+// 🔧 FIX: CORS configurato per accettare richieste dal frontend
+const corsOrigin = process.env.FRONTEND_URL || '*';
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: corsOrigin,
   credentials: true
 }));
 
@@ -124,7 +126,97 @@ const requireCapoclasse = (req, res, next) => {
 };
 
 // ============================================
-// ROUTES - AUTH
+// 🔧 PROXY AUTH - Inoltra richieste admin al Flask
+// ============================================
+
+/**
+ * Proxy per login admin
+ * POST /api/auth/admin/login
+ */
+app.post('/api/auth/admin/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username e password richiesti' });
+    }
+
+    // Inoltra la richiesta al servizio Flask Auth
+    const authServiceUrl = process.env.AUTH_SERVICE_URL;
+    
+    if (!authServiceUrl) {
+      // Se non c'è URL del servizio auth, usa autenticazione locale (fallback)
+      console.log('⚠️ AUTH_SERVICE_URL non configurato, uso fallback locale');
+      return await adminLoginFallback(req, res);
+    }
+
+    const response = await fetch(`${authServiceUrl}/api/auth/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+
+    const data = await response.json();
+    return res.status(response.status).json(data);
+
+  } catch (error) {
+    console.error('Errore proxy auth:', error);
+    // Fallback a login locale se il servizio auth non risponde
+    return await adminLoginFallback(req, res);
+  }
+});
+
+/**
+ * Fallback login admin locale (se Flask non disponibile)
+ */
+async function adminLoginFallback(req, res) {
+  try {
+    const { username, password } = req.body;
+    
+    const adminUsername = process.env.ADMIN_USERNAME || 'admin';
+    const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
+    
+    // Se non c'è hash configurato, rifiuta
+    if (!adminPasswordHash) {
+      return res.status(500).json({ error: 'Configurazione admin non disponibile' });
+    }
+
+    if (username !== adminUsername) {
+      return res.status(401).json({ error: 'Credenziali non valide' });
+    }
+
+    const validPassword = await bcrypt.compare(password, adminPasswordHash);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Credenziali non valide' });
+    }
+
+    // Genera JWT
+    const token = jwt.sign(
+      { 
+        user_id: 'admin', 
+        username: adminUsername, 
+        role: 'admin' 
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        username: adminUsername,
+        role: 'admin'
+      },
+      expires_in: 8 * 3600
+    });
+  } catch (error) {
+    console.error('Errore fallback login:', error);
+    res.status(500).json({ error: 'Errore interno del server' });
+  }
+}
+
+// ============================================
+// ROUTES - AUTH (Capoclasse)
 // ============================================
 
 /**
@@ -979,6 +1071,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Server avviato su porta ${PORT}`);
   console.log(`📁 Environment: ${NODE_ENV}`);
   console.log(`🔗 Database: ${process.env.DATABASE_URL ? 'Configurato' : 'NON CONFIGURATO'}`);
+  console.log(`🔐 Auth Service: ${process.env.AUTH_SERVICE_URL || 'Fallback locale'}`);
 });
 
 module.exports = app;
