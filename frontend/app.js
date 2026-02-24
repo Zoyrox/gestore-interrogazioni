@@ -7,13 +7,20 @@
 // ============================================
 // CONFIGURAZIONE
 // ============================================
+// ⚠️ IMPORTANTE: Configura qui gli URL dei tuoi servizi Render
 const CONFIG = {
+    // Backend Node.js API - in produzione lascia vuoto per stesso dominio
+    // Oppure inserisci l'URL completo: 'https://tuo-backend.onrender.com'
     API_URL: window.location.hostname === 'localhost' 
         ? 'http://localhost:3000' 
         : '',
+    
+    // Auth Service Flask - USA SEMPRE API_URL in produzione (proxy)
+    // Non contattare direttamente Flask dal frontend!
     AUTH_URL: window.location.hostname === 'localhost'
         ? 'http://localhost:5000'
-        : '',
+        : '',  // In prod: usa API_URL come proxy
+    
     ANIMATION_DURATION: 300
 };
 
@@ -232,7 +239,9 @@ class App {
         this.showLoading(true);
 
         try {
-            const response = await fetch(`${CONFIG.AUTH_URL}/api/auth/admin/login`, {
+            // 🔧 FIX: In produzione usa API_URL (proxy), non AUTH_URL diretto
+            const authUrl = CONFIG.AUTH_URL || CONFIG.API_URL;
+            const response = await fetch(`${authUrl}/api/auth/admin/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
@@ -255,7 +264,7 @@ class App {
             }
         } catch (error) {
             console.error('Errore login admin:', error);
-            this.showToast('Servizio auth non disponibile', 'error');
+            this.showToast('Servizio auth non disponibile. Verifica la configurazione.', 'error');
         } finally {
             this.showLoading(false);
         }
@@ -1000,15 +1009,15 @@ class App {
             );
             const data = await response.json();
 
-            this.animateNumber('status-total', data.total);
-            this.animateNumber('status-interrogated', data.interrogated);
-            this.animateNumber('status-available', data.remaining);
+            document.getElementById('status-total').textContent = data.total;
+            document.getElementById('status-interrogated').textContent = data.interrogated;
+            document.getElementById('status-available').textContent = data.remaining;
         } catch (error) {
-            console.error('Errore:', error);
+            console.error('Errore caricamento stato:', error);
         }
     }
 
-    async performExtraction() {
+    async extractStudent() {
         const classId = this.user.class?.id;
         const subjectId = document.getElementById('extract-subject').value;
         const date = document.getElementById('extract-date').value;
@@ -1018,8 +1027,7 @@ class App {
             return;
         }
 
-        const btn = document.querySelector('.extraction-card .btn-lg');
-        const originalText = btn.innerHTML;
+        const btn = document.getElementById('extract-btn');
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Estrazione...';
         btn.disabled = true;
 
@@ -1036,44 +1044,46 @@ class App {
             const data = await response.json();
 
             if (response.ok) {
-                const resultDiv = document.getElementById('extraction-result');
-                resultDiv.classList.remove('hidden');
-                document.getElementById('result-student').textContent = 
-                    `${data.student.first_name} ${data.student.last_name}`;
-                document.getElementById('result-subject').textContent = data.subject.name;
-                
+                this.showExtractionResult(data);
                 this.updateExtractionStatus();
-                this.showToast('Estrazione completata!', 'success');
-                
-                // Scroll al risultato
-                resultDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } else {
                 if (data.allInterrogated) {
-                    this.showToast('Tutti gli studenti sono stati interrogati. Resetta la materia.', 'warning');
+                    this.showToast('Tutti gli studenti sono stati interrogati! Resetta la materia.', 'warning');
                 } else {
                     this.showToast(data.error || 'Errore estrazione', 'error');
                 }
             }
         } catch (error) {
-            console.error('Errore:', error);
+            console.error('Errore estrazione:', error);
             this.showToast('Errore di connessione', 'error');
         } finally {
-            btn.innerHTML = originalText;
+            btn.innerHTML = '<i class="fas fa-random"></i> Estrai Studente';
             btn.disabled = false;
         }
     }
 
-    async loadCapoclasseCalendar() {
-        this.renderCalendar('capoclasse-calendar-grid', 'capoclasse');
+    showExtractionResult(data) {
+        const modal = document.getElementById('extraction-result-modal');
+        const content = document.getElementById('extraction-result-content');
+        
+        content.innerHTML = `
+            <div class="extraction-result" style="--subject-color: ${data.subject.color}">
+                <div class="result-student">${data.student.first_name} ${data.student.last_name}</div>
+                <div class="result-subject">${data.subject.name}</div>
+                <div class="result-meta">Rimangono ${data.remaining} studenti da interrogare</div>
+            </div>
+        `;
+        
+        modal.classList.add('active');
     }
 
     async loadExtractionHistory() {
         const classId = this.user.class?.id;
-        const subjectId = document.getElementById('history-subject-filter').value;
+        const subjectFilter = document.getElementById('history-subject-filter')?.value;
 
         try {
-            let url = `${CONFIG.API_URL}/api/classes/${classId}/extractions?limit=50`;
-            if (subjectId) url += `&subject_id=${subjectId}`;
+            let url = `${CONFIG.API_URL}/api/classes/${classId}/extractions`;
+            if (subjectFilter) url += `?subject_id=${subjectFilter}`;
 
             const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
@@ -1081,16 +1091,17 @@ class App {
             const extractions = await response.json();
 
             const tbody = document.getElementById('history-table-body');
+            if (extractions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center">Nessuna estrazione</td></tr>';
+                return;
+            }
+
             tbody.innerHTML = extractions.map((e, index) => `
-                <tr style="animation: fadeInUp 0.3s ease ${index * 0.02}s backwards;">
+                <tr style="animation: fadeInUp 0.3s ease ${index * 0.05}s backwards;">
                     <td>${new Date(e.extraction_date).toLocaleDateString('it-IT')}</td>
-                    <td>
-                        <span class="badge" style="background: ${e.subject_color}20; color: ${e.subject_color}; border: 1px solid ${e.subject_color}40;">
-                            ${e.subject_name}
-                        </span>
-                    </td>
-                    <td>${e.first_name} ${e.last_name}</td>
-                    <td>${new Date(e.created_at).toLocaleString('it-IT')}</td>
+                    <td><span class="subject-badge" style="background: ${e.subject_color}">${e.subject_name}</span></td>
+                    <td><strong>${e.last_name} ${e.first_name}</strong></td>
+                    <td>${new Date(e.created_at).toLocaleDateString('it-IT')}</td>
                 </tr>
             `).join('');
         } catch (error) {
@@ -1098,15 +1109,19 @@ class App {
         }
     }
 
+    async loadCapoclasseCalendar() {
+        this.renderCalendar('capoclasse-calendar-grid', 'capoclasse');
+    }
+
     // ============================================
     // STUDENT VIEW
     // ============================================
     async initStudentView() {
-        const className = document.getElementById('student-class-name');
-        if (className) {
-            className.textContent = this.user.class?.name || 'Classe';
+        const classDisplay = document.getElementById('student-class-display');
+        if (classDisplay) {
+            classDisplay.textContent = this.user.class?.name || 'Classe';
         }
-        this.renderCalendar('student-calendar-grid', 'student');
+        this.loadStudentCalendar();
         this.loadStudentSubjects();
     }
 
@@ -1115,202 +1130,114 @@ class App {
         if (!classId) return;
 
         try {
-            const response = await fetch(`${CONFIG.API_URL}/api/classes/${classId}/subjects`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
+            const response = await fetch(`${CONFIG.API_URL}/api/classes/${classId}/subjects`);
             const subjects = await response.json();
 
-            const legend = document.getElementById('student-subjects-legend');
-            legend.innerHTML = subjects.map((s, index) => `
-                <div class="legend-item" style="animation: fadeInUp 0.3s ease ${index * 0.05}s backwards;">
-                    <span class="legend-dot" style="background: ${s.color}; box-shadow: 0 0 10px ${s.color}80;"></span>
-                    <span>${s.name}</span>
+            const grid = document.getElementById('student-subjects-grid');
+            grid.innerHTML = subjects.map((s, index) => `
+                <div class="subject-card" style="--card-color: ${s.color}; animation: fadeInUp 0.4s ease ${index * 0.05}s backwards;">
+                    <div class="subject-card-header">
+                        <div>
+                            <h4>${s.name}</h4>
+                            <span class="subject-card-meta">${s.color}</span>
+                        </div>
+                    </div>
                 </div>
             `).join('');
         } catch (error) {
-            console.error('Errore:', error);
+            console.error('Errore caricamento materie:', error);
         }
+    }
+
+    async loadStudentCalendar() {
+        this.renderCalendar('student-calendar-grid', 'student');
     }
 
     // ============================================
     // CALENDARIO
     // ============================================
-    async renderCalendar(gridId, viewType) {
+    renderCalendar(gridId, viewType) {
         const grid = document.getElementById(gridId);
         if (!grid) return;
 
         const year = this.currentDate.getFullYear();
         const month = this.currentDate.getMonth();
-
+        
         // Aggiorna titolo
-        const monthNames = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
-            'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
-        
-        const titleId = viewType === 'student' ? 'student-calendar-month-year' : 
-                       viewType === 'capoclasse' ? 'capoclasse-calendar-month-year' :
-                       'calendar-month-year';
-        
-        const titleEl = document.getElementById(titleId);
-        if (titleEl) titleEl.textContent = `${monthNames[month]} ${year}`;
-
-        // Carica interrogazioni
-        const classId = viewType === 'student' ? this.user.class?.id :
-                       viewType === 'capoclasse' ? this.user.class?.id :
-                       document.getElementById('calendar-class-filter')?.value;
-
-        let interrogations = [];
-        if (classId) {
-            try {
-                const token = viewType === 'student' ? '' : this.token;
-                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-                
-                const response = await fetch(
-                    `${CONFIG.API_URL}/api/classes/${classId}/interrogations?month=${month + 1}&year=${year}`,
-                    { headers }
-                );
-                interrogations = await response.json();
-            } catch (error) {
-                console.error('Errore caricamento interrogazioni:', error);
-            }
+        const titleEl = document.getElementById(`${viewType}-calendar-title`);
+        if (titleEl) {
+            titleEl.textContent = new Date(year, month).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
         }
 
-        // Genera griglia
-        const firstDay = new Date(year, month, 1).getDay();
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const daysInPrevMonth = new Date(year, month, 0).getDate();
+        // Primo giorno del mese
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const daysInMonth = lastDay.getDate();
+        const startingDay = firstDay.getDay() || 7; // 1 = Lunedì
 
         let html = '';
-
-        // Header giorni
-        const dayNames = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
-        dayNames.forEach(day => {
-            html += `<div class="calendar-day-header">${day}</div>`;
-        });
-
-        // Giorni mese precedente
-        for (let i = firstDay - 1; i >= 0; i--) {
-            const day = daysInPrevMonth - i;
-            html += `<div class="calendar-day other-month"><span class="calendar-day-number">${day}</span></div>`;
+        
+        // Celle vuote prima del primo giorno
+        for (let i = 1; i < startingDay; i++) {
+            html += '<div class="calendar-day empty"></div>';
         }
 
-        // Giorni mese corrente
-        const today = new Date();
+        // Giorni del mese
         for (let day = 1; day <= daysInMonth; day++) {
-            const isToday = today.getDate() === day && today.getMonth() === month && today.getFullYear() === year;
-            const dayInterrogations = interrogations.filter(i => {
-                const d = new Date(i.date);
-                return d.getDate() === day;
-            });
-
-            html += `<div class="calendar-day ${isToday ? 'today' : ''}" onclick="app.showDayDetail(${day}, ${month}, ${year})">`;
-            html += `<span class="calendar-day-number">${day}</span>`;
-            html += `<div class="calendar-day-events">`;
-            dayInterrogations.forEach(i => {
-                html += `<span class="calendar-event-dot" style="background: ${i.subject_color}"></span>`;
-            });
-            html += `</div></div>`;
-        }
-
-        // Giorni mese successivo
-        const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
-        const remainingCells = totalCells - (firstDay + daysInMonth);
-        for (let day = 1; day <= remainingCells; day++) {
-            html += `<div class="calendar-day other-month"><span class="calendar-day-number">${day}</span></div>`;
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
+            
+            html += `
+                <div class="calendar-day ${isToday ? 'today' : ''}" data-date="${dateStr}">
+                    <span class="day-number">${day}</span>
+                    <div class="day-events"></div>
+                </div>
+            `;
         }
 
         grid.innerHTML = html;
+
+        // Carica interrogazioni
+        this.loadCalendarEvents(viewType, year, month + 1);
     }
 
-    prevMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() - 1);
-        this.loadAdminCalendar();
-    }
-
-    nextMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() + 1);
-        this.loadAdminCalendar();
-    }
-
-    capoclassePrevMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() - 1);
-        this.loadCapoclasseCalendar();
-    }
-
-    capoclasseNextMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() + 1);
-        this.loadCapoclasseCalendar();
-    }
-
-    studentPrevMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() - 1);
-        this.initStudentView();
-    }
-
-    studentNextMonth() {
-        this.currentDate.setMonth(this.currentDate.getMonth() + 1);
-        this.initStudentView();
-    }
-
-    async showDayDetail(day, month, year) {
-        const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const classId = this.user.class?.id || document.getElementById('calendar-class-filter')?.value;
-        
+    async loadCalendarEvents(viewType, year, month) {
+        const classId = this.user.class?.id || (viewType === 'admin' ? null : this.user.class?.id);
         if (!classId) return;
-
-        document.getElementById('day-detail-title').innerHTML = 
-            `<i class="fas fa-calendar-day"></i> ${day}/${month + 1}/${year}`;
 
         try {
             const response = await fetch(
-                `${CONFIG.API_URL}/api/classes/${classId}/interrogations?month=${month + 1}&year=${year}`,
+                `${CONFIG.API_URL}/api/classes/${classId}/interrogations?year=${year}&month=${month}`,
                 { headers: this.token ? { 'Authorization': `Bearer ${this.token}` } : {} }
             );
             const interrogations = await response.json();
-            const dayInterrogations = interrogations.filter(i => i.date === date);
 
-            let html = '';
-            if (dayInterrogations.length === 0) {
-                html = '<p style="color: var(--gray-400); text-align: center; padding: 2rem;">Nessuna interrogazione programmata</p>';
-            } else {
-                html = '<div class="day-interrogations">';
-                dayInterrogations.forEach(i => {
-                    html += `
-                        <div class="day-interrogation-item" style="border-left: 3px solid ${i.subject_color}; padding: 1rem; margin-bottom: 0.5rem; background: rgba(0,0,0,0.2); border-radius: var(--radius);">
-                            <strong style="color: ${i.subject_color};">${i.subject_name}</strong>
-                            ${i.notes ? `<p style="margin-top: 0.5rem; color: var(--gray-400);">${i.notes}</p>` : ''}
-                        </div>
-                    `;
-                });
-                html += '</div>';
-            }
-
-            document.getElementById('day-detail-content').innerHTML = html;
-            this.showModal('day-detail-modal');
+            interrogations.forEach(i => {
+                const date = new Date(i.date);
+                const day = date.getDate();
+                const dayEl = document.querySelector(`#${viewType}-calendar-grid .calendar-day:nth-child(${day + new Date(year, month - 1, 1).getDay()}) .day-events`);
+                
+                if (dayEl) {
+                    const event = document.createElement('div');
+                    event.className = 'calendar-event';
+                    event.style.background = i.subject_color;
+                    event.textContent = i.subject_name;
+                    dayEl.appendChild(event);
+                }
+            });
         } catch (error) {
-            console.error('Errore:', error);
+            console.error('Errore caricamento interrogazioni:', error);
         }
     }
 
-    // ============================================
-    // MODALS
-    // ============================================
-    showModal(modalId) {
-        const modal = document.getElementById(modalId);
-        modal.classList.add('active');
-        document.body.style.overflow = 'hidden';
+    prevMonth(viewType) {
+        this.currentDate.setMonth(this.currentDate.getMonth() - 1);
+        this.renderCalendar(`${viewType}-calendar-grid`, viewType);
     }
 
-    hideModal(modalId) {
-        const modal = document.getElementById(modalId);
-        modal.classList.remove('active');
-        document.body.style.overflow = '';
-    }
-
-    hideAllModals() {
-        document.querySelectorAll('.modal').forEach(m => {
-            m.classList.remove('active');
-        });
-        document.body.style.overflow = '';
+    nextMonth(viewType) {
+        this.currentDate.setMonth(this.currentDate.getMonth() + 1);
+        this.renderCalendar(`${viewType}-calendar-grid`, viewType);
     }
 
     // ============================================
@@ -1326,23 +1253,19 @@ class App {
 
             const selects = [
                 'student-class-filter',
-                'subject-class-filter',
-                'calendar-class-filter',
-                'extractor-class-filter',
                 'new-student-class',
+                'subject-class-filter',
                 'new-subject-class',
-                'new-extractor-class',
-                'new-interrogation-class'
+                'extractor-class-filter',
+                'new-extractor-class'
             ];
 
             selects.forEach(id => {
                 const select = document.getElementById(id);
                 if (select) {
-                    const currentValue = select.value;
-                    const placeholder = select.options[0]?.text || 'Seleziona classe...';
-                    select.innerHTML = `<option value="">${placeholder}</option>` + 
+                    const isFilter = id.includes('filter');
+                    select.innerHTML = (isFilter ? '<option value="">Tutte le classi</option>' : '<option value="">Seleziona classe...</option>') +
                         classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-                    select.value = currentValue;
                 }
             });
         } catch (error) {
@@ -1350,103 +1273,55 @@ class App {
         }
     }
 
-    async loadSubjectsForInterrogation() {
-        const classId = document.getElementById('new-interrogation-class').value;
-        const select = document.getElementById('new-interrogation-subject');
-        
-        if (!classId) {
-            select.innerHTML = '<option value="">Seleziona materia...</option>';
-            return;
-        }
-
-        try {
-            const response = await fetch(`${CONFIG.API_URL}/api/classes/${classId}/subjects`, {
-                headers: { 'Authorization': `Bearer ${this.token}` }
-            });
-            const subjects = await response.json();
-            
-            select.innerHTML = '<option value="">Seleziona materia...</option>' + 
-                subjects.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-        } catch (error) {
-            console.error('Errore:', error);
-        }
-    }
-
-    async addInterrogation() {
-        const classId = document.getElementById('new-interrogation-class').value;
-        const subjectId = document.getElementById('new-interrogation-subject').value;
-        const date = document.getElementById('new-interrogation-date').value;
-        const notes = document.getElementById('new-interrogation-notes').value.trim();
-
-        if (!classId || !subjectId || !date) {
-            this.showToast('Compila tutti i campi obbligatori', 'error');
-            return;
-        }
-
-        try {
-            const response = await fetch(`${CONFIG.API_URL}/api/interrogations`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.token}`
-                },
-                body: JSON.stringify({ class_id: classId, subject_id: subjectId, date, notes })
-            });
-
-            if (response.ok) {
-                this.showToast('Interrogazione programmata!', 'success');
-                this.hideModal('add-interrogation-modal');
-                document.getElementById('new-interrogation-notes').value = '';
-                this.loadAdminCalendar();
-            } else {
-                const data = await response.json();
-                this.showToast(data.error || 'Errore', 'error');
-            }
-        } catch (error) {
-            console.error('Errore:', error);
-            this.showToast('Errore di connessione', 'error');
-        }
-    }
-
-    viewClassDetails(classId) {
-        this.showToast('Funzionalità in sviluppo', 'info');
-    }
-
-    // ============================================
-    // TOAST NOTIFICATIONS
-    // ============================================
     showToast(message, type = 'info') {
-        const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        
-        const icons = {
-            success: 'check-circle',
-            error: 'exclamation-circle',
-            warning: 'exclamation-triangle',
-            info: 'info-circle'
-        };
-
+        toast.className = `toast toast-${type}`;
         toast.innerHTML = `
-            <i class="fas fa-${icons[type]}"></i>
-            <span class="toast-message">${message}</span>
-            <button class="toast-close" onclick="this.parentElement.remove()">
-                <i class="fas fa-times"></i>
-            </button>
+            <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+            <span>${message}</span>
         `;
-
+        
+        const container = document.getElementById('toast-container') || document.body;
         container.appendChild(toast);
 
-        // Auto remove
+        // Anima in
+        requestAnimationFrame(() => {
+            toast.style.animation = 'slideInRight 0.3s ease';
+        });
+
+        // Rimuovi dopo 3 secondi
         setTimeout(() => {
-            toast.style.animation = 'slideInRight 0.4s ease reverse forwards';
-            setTimeout(() => toast.remove(), 400);
-        }, 5000);
+            toast.style.animation = 'slideOutRight 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
     }
 
     showLoading(show) {
-        const overlay = document.getElementById('loading-overlay');
-        overlay.classList.toggle('hidden', !show);
+        let loader = document.getElementById('global-loader');
+        if (!loader) {
+            loader = document.createElement('div');
+            loader.id = 'global-loader';
+            loader.innerHTML = '<div class="spinner"></div>';
+            document.body.appendChild(loader);
+        }
+        loader.style.display = show ? 'flex' : 'none';
+    }
+
+    showModal(modalId) {
+        document.getElementById(modalId)?.classList.add('active');
+    }
+
+    hideModal(modalId) {
+        document.getElementById(modalId)?.classList.remove('active');
+    }
+
+    hideAllModals() {
+        document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
+    }
+
+    viewClassDetails(classId) {
+        // Implementa se necessario
+        console.log('View class details:', classId);
     }
 }
 
@@ -1454,23 +1329,3 @@ class App {
 // INIZIALIZZAZIONE APP
 // ============================================
 const app = new App();
-
-// Aggiungi stili per animazioni aggiuntive
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes fadeOut {
-        from { opacity: 1; transform: translateY(0); }
-        to { opacity: 0; transform: translateY(-10px); }
-    }
-    
-    .shake {
-        animation: shake 0.5s ease !important;
-    }
-    
-    @keyframes shake {
-        0%, 100% { transform: translateX(0); }
-        10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-        20%, 40%, 60%, 80% { transform: translateX(5px); }
-    }
-`;
-document.head.appendChild(style);
