@@ -1,25 +1,21 @@
 /**
  * GESTORE INTERROGAZIONI SCOLASTICHE
  * Applicazione Frontend JavaScript v2.0
- * Con animazioni spettacolari
  */
 
 // ============================================
 // CONFIGURAZIONE
 // ============================================
-// ⚠️ IMPORTANTE: Configura qui gli URL dei tuoi servizi Render
 const CONFIG = {
-    // Backend Node.js API - in produzione lascia vuoto per stesso dominio
-    // Oppure inserisci l'URL completo: 'https://tuo-backend.onrender.com'
+    // In locale: usa i server separati
+    // In produzione: usa lo stesso dominio (il backend serve anche il frontend)
     API_URL: window.location.hostname === 'localhost' 
         ? 'http://localhost:3000' 
-        : '',
+        : '',  // Vuoto = stesso dominio in produzione
     
-    // Auth Service Flask - USA SEMPRE API_URL in produzione (proxy)
-    // Non contattare direttamente Flask dal frontend!
     AUTH_URL: window.location.hostname === 'localhost'
         ? 'http://localhost:5000'
-        : '',  // In prod: usa API_URL come proxy
+        : '',  // In prod: usa API_URL (stesso dominio)
     
     ANIMATION_DURATION: 300
 };
@@ -45,9 +41,6 @@ class App {
         this.init();
     }
 
-    // ============================================
-    // INIZIALIZZAZIONE
-    // ============================================
     init() {
         this.bindEvents();
         this.initAnimations();
@@ -55,12 +48,10 @@ class App {
     }
 
     initAnimations() {
-        // Aggiungi classe per animazioni iniziali
         document.body.classList.add('animations-ready');
     }
 
     bindEvents() {
-        // Tab login con animazione
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const tab = e.currentTarget.dataset.tab;
@@ -68,7 +59,6 @@ class App {
             });
         });
 
-        // Navigazione sidebar
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -77,14 +67,12 @@ class App {
             });
         });
 
-        // Chiudi modal con ESC
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 this.hideAllModals();
             }
         });
 
-        // Chiudi modal cliccando fuori
         document.querySelectorAll('.modal').forEach(modal => {
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) {
@@ -93,7 +81,6 @@ class App {
             });
         });
 
-        // Color picker
         const colorInput = document.getElementById('new-subject-color');
         if (colorInput) {
             colorInput.addEventListener('input', (e) => {
@@ -104,7 +91,6 @@ class App {
             });
         }
 
-        // Enter key su form
         document.querySelectorAll('input').forEach(input => {
             input.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
@@ -239,7 +225,7 @@ class App {
         this.showLoading(true);
 
         try {
-            // 🔧 FIX: In produzione usa API_URL (proxy), non AUTH_URL diretto
+            // In produzione: usa API_URL (il backend fa da proxy al Flask)
             const authUrl = CONFIG.AUTH_URL || CONFIG.API_URL;
             const response = await fetch(`${authUrl}/api/auth/admin/login`, {
                 method: 'POST',
@@ -264,7 +250,7 @@ class App {
             }
         } catch (error) {
             console.error('Errore login admin:', error);
-            this.showToast('Servizio auth non disponibile. Verifica la configurazione.', 'error');
+            this.showToast('Servizio auth non disponibile', 'error');
         } finally {
             this.showLoading(false);
         }
@@ -282,7 +268,6 @@ class App {
     }
 
     switchLoginTab(tab) {
-        // Anima uscita form attivo
         const activeForm = document.querySelector('.login-form.active');
         if (activeForm) {
             activeForm.style.animation = 'fadeOut 0.2s ease forwards';
@@ -290,7 +275,6 @@ class App {
                 activeForm.classList.remove('active');
                 activeForm.style.animation = '';
                 
-                // Attiva nuovo tab
                 document.querySelectorAll('.tab-btn').forEach(btn => {
                     btn.classList.toggle('active', btn.dataset.tab === tab);
                 });
@@ -317,7 +301,6 @@ class App {
         const type = input.type === 'password' ? 'text' : 'password';
         input.type = type;
         
-        // Anima icona
         const icon = input.parentElement.querySelector('.toggle-password i');
         icon.style.transform = 'scale(0.8)';
         setTimeout(() => {
@@ -330,7 +313,6 @@ class App {
     // ANIMAZIONI
     // ============================================
     animateTransition(callback) {
-        // Crea overlay di transizione
         const overlay = document.createElement('div');
         overlay.style.cssText = `
             position: fixed;
@@ -345,12 +327,10 @@ class App {
         `;
         document.body.appendChild(overlay);
         
-        // Fade in
         requestAnimationFrame(() => {
             overlay.style.opacity = '1';
         });
         
-        // Esegui callback e fade out
         setTimeout(() => {
             callback();
             overlay.style.opacity = '0';
@@ -395,7 +375,6 @@ class App {
     }
 
     navigateTo(section) {
-        // Aggiorna nav attiva con animazione
         document.querySelectorAll('.nav-item').forEach(item => {
             const isActive = item.dataset.section === section;
             item.classList.toggle('active', isActive);
@@ -405,7 +384,6 @@ class App {
             }
         });
 
-        // Nascondi tutte le sezioni
         const view = this.currentView;
         const sections = document.querySelectorAll(`#${view}-view .content-section`);
         
@@ -419,14 +397,12 @@ class App {
             }
         });
 
-        // Mostra nuova sezione
         setTimeout(() => {
             const newSection = document.getElementById(`${view}-${section}-section`);
             newSection.classList.remove('hidden');
             newSection.style.animation = 'fadeInUp 0.4s ease';
         }, 250);
 
-        // Aggiorna titolo
         const titles = {
             dashboard: 'Dashboard',
             classes: 'Gestione Classi',
@@ -446,7 +422,6 @@ class App {
             }, 150);
         }
 
-        // Carica dati sezione
         setTimeout(() => {
             if (view === 'admin') {
                 if (section === 'dashboard') this.loadDashboardStats();
@@ -482,7 +457,6 @@ class App {
             });
             const data = await response.json();
 
-            // Anima i numeri
             this.animateNumber('stat-classes', data.total_classes);
             this.animateNumber('stat-students', data.total_students);
             this.animateNumber('stat-subjects', data.total_subjects);
@@ -503,7 +477,7 @@ class App {
         const animate = (currentTime) => {
             const elapsed = currentTime - startTime;
             const progress = Math.min(elapsed / duration, 1);
-            const easeProgress = 1 - Math.pow(1 - progress, 3); // Ease out cubic
+            const easeProgress = 1 - Math.pow(1 - progress, 3);
             const currentValue = Math.floor(startValue + (targetValue - startValue) * easeProgress);
             
             element.textContent = currentValue;
@@ -581,7 +555,6 @@ class App {
                 this.loadClasses();
                 this.populateClassSelects();
                 
-                // Reset form
                 document.getElementById('new-class-name').value = '';
                 document.getElementById('new-class-year').value = '';
                 document.getElementById('new-class-section').value = '';
@@ -960,7 +933,6 @@ class App {
         const classId = this.user.class?.id;
         if (!classId) return;
 
-        // Carica materie
         try {
             const subjectsRes = await fetch(`${CONFIG.API_URL}/api/classes/${classId}/subjects`, {
                 headers: { 'Authorization': `Bearer ${this.token}` }
@@ -972,7 +944,6 @@ class App {
             select.innerHTML = '<option value="">Seleziona materia...</option>' + 
                 subjects.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
 
-            // Carica storico per filtro
             const historySelect = document.getElementById('history-subject-filter');
             if (historySelect) {
                 historySelect.innerHTML = '<option value="">Tutte le materie</option>' + 
@@ -982,10 +953,8 @@ class App {
             console.error('Errore caricamento materie:', error);
         }
 
-        // Imposta data odierna
         document.getElementById('extract-date').valueAsDate = new Date();
 
-        // Aggiorna stato quando cambia materia
         document.getElementById('extract-subject').addEventListener('change', () => {
             this.updateExtractionStatus();
         });
@@ -1163,26 +1132,22 @@ class App {
         const year = this.currentDate.getFullYear();
         const month = this.currentDate.getMonth();
         
-        // Aggiorna titolo
         const titleEl = document.getElementById(`${viewType}-calendar-title`);
         if (titleEl) {
             titleEl.textContent = new Date(year, month).toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
         }
 
-        // Primo giorno del mese
         const firstDay = new Date(year, month, 1);
         const lastDay = new Date(year, month + 1, 0);
         const daysInMonth = lastDay.getDate();
-        const startingDay = firstDay.getDay() || 7; // 1 = Lunedì
+        const startingDay = firstDay.getDay() || 7;
 
         let html = '';
         
-        // Celle vuote prima del primo giorno
         for (let i = 1; i < startingDay; i++) {
             html += '<div class="calendar-day empty"></div>';
         }
 
-        // Giorni del mese
         for (let day = 1; day <= daysInMonth; day++) {
             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
@@ -1197,7 +1162,6 @@ class App {
 
         grid.innerHTML = html;
 
-        // Carica interrogazioni
         this.loadCalendarEvents(viewType, year, month + 1);
     }
 
@@ -1284,12 +1248,10 @@ class App {
         const container = document.getElementById('toast-container') || document.body;
         container.appendChild(toast);
 
-        // Anima in
         requestAnimationFrame(() => {
             toast.style.animation = 'slideInRight 0.3s ease';
         });
 
-        // Rimuovi dopo 3 secondi
         setTimeout(() => {
             toast.style.animation = 'slideOutRight 0.3s ease';
             setTimeout(() => toast.remove(), 300);
@@ -1320,7 +1282,6 @@ class App {
     }
 
     viewClassDetails(classId) {
-        // Implementa se necessario
         console.log('View class details:', classId);
     }
 }
