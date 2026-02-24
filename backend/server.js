@@ -38,17 +38,16 @@ app.use(helmet({
   },
 }));
 
-// 🔧 FIX: CORS configurato per accettare richieste dal frontend
-const corsOrigin = process.env.FRONTEND_URL || '*';
+// CORS configurato
 app.use(cors({
-  origin: corsOrigin,
+  origin: process.env.FRONTEND_URL || '*',
   credentials: true
 }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minuti
-  max: 100, // limita ogni IP a 100 richieste per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Troppe richieste, riprova più tardi'
 });
 app.use(limiter);
@@ -85,9 +84,6 @@ pool.connect((err, client, release) => {
 // MIDDLEWARE DI AUTENTICAZIONE
 // ============================================
 
-/**
- * Verifica JWT token
- */
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -105,9 +101,6 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-/**
- * Verifica ruolo admin
- */
 const requireAdmin = (req, res, next) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Accesso riservato agli admin' });
@@ -115,9 +108,6 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-/**
- * Verifica ruolo capoclasse
- */
 const requireCapoclasse = (req, res, next) => {
   if (req.user.role !== 'capoclasse' && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Accesso riservato ai capoclasse' });
@@ -129,10 +119,9 @@ const requireCapoclasse = (req, res, next) => {
 // 🔧 PROXY AUTH - Inoltra richieste admin al Flask
 // ============================================
 
-/**
- * Proxy per login admin
- * POST /api/auth/admin/login
- */
+// Usa fetch nativo di Node.js 18+
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
 app.post('/api/auth/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -145,30 +134,31 @@ app.post('/api/auth/admin/login', async (req, res) => {
     const authServiceUrl = process.env.AUTH_SERVICE_URL;
     
     if (!authServiceUrl) {
-      // Se non c'è URL del servizio auth, usa autenticazione locale (fallback)
       console.log('⚠️ AUTH_SERVICE_URL non configurato, uso fallback locale');
       return await adminLoginFallback(req, res);
     }
 
-    const response = await fetch(`${authServiceUrl}/api/auth/admin/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
+    try {
+      const response = await fetch(`${authServiceUrl}/api/auth/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
 
-    const data = await response.json();
-    return res.status(response.status).json(data);
+      const data = await response.json();
+      return res.status(response.status).json(data);
+    } catch (fetchError) {
+      console.error('Errore connessione a auth service:', fetchError.message);
+      // Fallback a login locale
+      return await adminLoginFallback(req, res);
+    }
 
   } catch (error) {
     console.error('Errore proxy auth:', error);
-    // Fallback a login locale se il servizio auth non risponde
     return await adminLoginFallback(req, res);
   }
 });
 
-/**
- * Fallback login admin locale (se Flask non disponibile)
- */
 async function adminLoginFallback(req, res) {
   try {
     const { username, password } = req.body;
@@ -176,7 +166,6 @@ async function adminLoginFallback(req, res) {
     const adminUsername = process.env.ADMIN_USERNAME || 'admin';
     const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
     
-    // Se non c'è hash configurato, rifiuta
     if (!adminPasswordHash) {
       return res.status(500).json({ error: 'Configurazione admin non disponibile' });
     }
@@ -190,7 +179,6 @@ async function adminLoginFallback(req, res) {
       return res.status(401).json({ error: 'Credenziali non valide' });
     }
 
-    // Genera JWT
     const token = jwt.sign(
       { 
         user_id: 'admin', 
@@ -219,10 +207,6 @@ async function adminLoginFallback(req, res) {
 // ROUTES - AUTH (Capoclasse)
 // ============================================
 
-/**
- * Login capoclasse
- * POST /api/auth/login
- */
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -247,7 +231,6 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenziali non valide' });
     }
 
-    // Ottieni la classe associata al capoclasse
     const classResult = await pool.query(
       'SELECT c.* FROM classes c JOIN class_extractors ce ON c.id = ce.class_id WHERE ce.user_id = $1',
       [user.id]
@@ -279,22 +262,14 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-/**
- * Verifica token
- * GET /api/auth/verify
- */
 app.get('/api/auth/verify', authenticateToken, (req, res) => {
   res.json({ valid: true, user: req.user });
 });
 
 // ============================================
-// ROUTES - CLASSI (ADMIN)
+// ROUTES - CLASSI
 // ============================================
 
-/**
- * Crea nuova classe
- * POST /api/classes
- */
 app.post('/api/classes', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { name, year, section } = req.body;
@@ -303,7 +278,6 @@ app.post('/api/classes', authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Nome classe richiesto' });
     }
 
-    // Genera codice univoco
     const code = generateClassCode();
 
     const result = await pool.query(
@@ -318,10 +292,6 @@ app.post('/api/classes', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-/**
- * Ottieni tutte le classi
- * GET /api/classes
- */
 app.get('/api/classes', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -341,15 +311,10 @@ app.get('/api/classes', authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-/**
- * Ottieni singola classe
- * GET /api/classes/:id
- */
 app.get('/api/classes/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verifica permessi
     if (req.user.role === 'capoclasse' && req.user.classId != id) {
       return res.status(403).json({ error: 'Accesso non autorizzato a questa classe' });
     }
@@ -376,14 +341,9 @@ app.get('/api/classes/:id', authenticateToken, async (req, res) => {
   }
 });
 
-/**
- * Elimina classe
- * DELETE /api/classes/:id
- */
 app.delete('/api/classes/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-
     await pool.query('DELETE FROM classes WHERE id = $1', [id]);
     res.json({ message: 'Classe eliminata con successo' });
   } catch (error) {
@@ -392,10 +352,6 @@ app.delete('/api/classes/:id', authenticateToken, requireAdmin, async (req, res)
   }
 });
 
-/**
- * Accesso classe con codice (pubblico)
- * POST /api/classes/access
- */
 app.post('/api/classes/access', async (req, res) => {
   try {
     const { code } = req.body;
@@ -430,10 +386,6 @@ app.post('/api/classes/access', async (req, res) => {
 // ROUTES - STUDENTI
 // ============================================
 
-/**
- * Aggiungi studente
- * POST /api/classes/:classId/students
- */
 app.post('/api/classes/:classId/students', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -455,15 +407,10 @@ app.post('/api/classes/:classId/students', authenticateToken, requireAdmin, asyn
   }
 });
 
-/**
- * Ottieni studenti di una classe
- * GET /api/classes/:classId/students
- */
 app.get('/api/classes/:classId/students', authenticateToken, async (req, res) => {
   try {
     const { classId } = req.params;
 
-    // Verifica permessi
     if (req.user.role === 'capoclasse' && req.user.classId != classId) {
       return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
@@ -480,10 +427,6 @@ app.get('/api/classes/:classId/students', authenticateToken, async (req, res) =>
   }
 });
 
-/**
- * Elimina studente
- * DELETE /api/students/:id
- */
 app.delete('/api/students/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -499,10 +442,6 @@ app.delete('/api/students/:id', authenticateToken, requireAdmin, async (req, res
 // ROUTES - MATERIE
 // ============================================
 
-/**
- * Aggiungi materia
- * POST /api/classes/:classId/subjects
- */
 app.post('/api/classes/:classId/subjects', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -524,10 +463,6 @@ app.post('/api/classes/:classId/subjects', authenticateToken, requireAdmin, asyn
   }
 });
 
-/**
- * Ottieni materie di una classe
- * GET /api/classes/:classId/subjects
- */
 app.get('/api/classes/:classId/subjects', authenticateToken, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -548,10 +483,6 @@ app.get('/api/classes/:classId/subjects', authenticateToken, async (req, res) =>
   }
 });
 
-/**
- * Elimina materia
- * DELETE /api/subjects/:id
- */
 app.delete('/api/subjects/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -563,10 +494,6 @@ app.delete('/api/subjects/:id', authenticateToken, requireAdmin, async (req, res
   }
 });
 
-/**
- * Reset materia (cancella storico interrogazioni)
- * POST /api/subjects/:id/reset
- */
 app.post('/api/subjects/:id/reset', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -579,13 +506,9 @@ app.post('/api/subjects/:id/reset', authenticateToken, requireAdmin, async (req,
 });
 
 // ============================================
-// ROUTES - INTERROGAZIONI (CALENDARIO)
+// ROUTES - INTERROGAZIONI
 // ============================================
 
-/**
- * Programma interrogazione
- * POST /api/interrogations
- */
 app.post('/api/interrogations', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { class_id, subject_id, date, notes } = req.body;
@@ -606,10 +529,6 @@ app.post('/api/interrogations', authenticateToken, requireAdmin, async (req, res
   }
 });
 
-/**
- * Ottieni interrogazioni di una classe
- * GET /api/classes/:classId/interrogations
- */
 app.get('/api/classes/:classId/interrogations', authenticateToken, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -642,10 +561,6 @@ app.get('/api/classes/:classId/interrogations', authenticateToken, async (req, r
   }
 });
 
-/**
- * Elimina interrogazione
- * DELETE /api/interrogations/:id
- */
 app.delete('/api/interrogations/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -661,10 +576,6 @@ app.delete('/api/interrogations/:id', authenticateToken, requireAdmin, async (re
 // ROUTES - ESCLUSIONI
 // ============================================
 
-/**
- * Aggiungi esclusione
- * POST /api/exclusions
- */
 app.post('/api/exclusions', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { student_id, date, reason } = req.body;
@@ -685,10 +596,6 @@ app.post('/api/exclusions', authenticateToken, requireAdmin, async (req, res) =>
   }
 });
 
-/**
- * Ottieni esclusioni di una classe
- * GET /api/classes/:classId/exclusions
- */
 app.get('/api/classes/:classId/exclusions', authenticateToken, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -721,10 +628,6 @@ app.get('/api/classes/:classId/exclusions', authenticateToken, async (req, res) 
   }
 });
 
-/**
- * Elimina esclusione
- * DELETE /api/exclusions/:id
- */
 app.delete('/api/exclusions/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
@@ -740,10 +643,6 @@ app.delete('/api/exclusions/:id', authenticateToken, requireAdmin, async (req, r
 // ROUTES - ESTRAZIONI
 // ============================================
 
-/**
- * Effettua estrazione casuale
- * POST /api/extractions
- */
 app.post('/api/extractions', authenticateToken, requireCapoclasse, async (req, res) => {
   try {
     const { class_id, subject_id, date } = req.body;
@@ -752,12 +651,10 @@ app.post('/api/extractions', authenticateToken, requireCapoclasse, async (req, r
       return res.status(400).json({ error: 'Classe, materia e data richiesti' });
     }
 
-    // Verifica che il capoclasse possa estrarre per questa classe
     if (req.user.role === 'capoclasse' && req.user.classId != class_id) {
       return res.status(403).json({ error: 'Non autorizzato a estrarre per questa classe' });
     }
 
-    // Ottieni tutti gli studenti della classe
     const studentsResult = await pool.query(
       'SELECT * FROM students WHERE class_id = $1 ORDER BY last_name, first_name',
       [class_id]
@@ -769,14 +666,12 @@ app.post('/api/extractions', authenticateToken, requireCapoclasse, async (req, r
 
     const allStudents = studentsResult.rows;
 
-    // Ottieni studenti già interrogati in questa materia
     const interrogatedResult = await pool.query(
       'SELECT DISTINCT student_id FROM extraction_history WHERE subject_id = $1 AND class_id = $2',
       [subject_id, class_id]
     );
     const interrogatedIds = new Set(interrogatedResult.rows.map(r => r.student_id));
 
-    // Ottieni studenti esclusi per questa data
     const exclusionsResult = await pool.query(
       `SELECT e.student_id 
        FROM exclusions e
@@ -786,7 +681,6 @@ app.post('/api/extractions', authenticateToken, requireCapoclasse, async (req, r
     );
     const excludedIds = new Set(exclusionsResult.rows.map(r => r.student_id));
 
-    // Filtra studenti disponibili
     const availableStudents = allStudents.filter(s => 
       !interrogatedIds.has(s.id) && !excludedIds.has(s.id)
     );
@@ -798,11 +692,9 @@ app.post('/api/extractions', authenticateToken, requireCapoclasse, async (req, r
       });
     }
 
-    // Estrazione casuale reale
     const randomIndex = Math.floor(Math.random() * availableStudents.length);
     const selectedStudent = availableStudents[randomIndex];
 
-    // Salva l'estrazione
     const extractionResult = await pool.query(
       `INSERT INTO extraction_history 
        (class_id, subject_id, student_id, extraction_date, extracted_by) 
@@ -810,7 +702,6 @@ app.post('/api/extractions', authenticateToken, requireCapoclasse, async (req, r
       [class_id, subject_id, selectedStudent.id, date, req.user.userId]
     );
 
-    // Ottieni info materia
     const subjectResult = await pool.query(
       'SELECT name, color FROM subjects WHERE id = $1',
       [subject_id]
@@ -828,10 +719,6 @@ app.post('/api/extractions', authenticateToken, requireCapoclasse, async (req, r
   }
 });
 
-/**
- * Ottieni storico estrazioni
- * GET /api/classes/:classId/extractions
- */
 app.get('/api/classes/:classId/extractions', authenticateToken, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -872,10 +759,6 @@ app.get('/api/classes/:classId/extractions', authenticateToken, async (req, res)
   }
 });
 
-/**
- * Ottieni stato interrogati per materia
- * GET /api/classes/:classId/subjects/:subjectId/status
- */
 app.get('/api/classes/:classId/subjects/:subjectId/status', authenticateToken, async (req, res) => {
   try {
     const { classId, subjectId } = req.params;
@@ -884,13 +767,11 @@ app.get('/api/classes/:classId/subjects/:subjectId/status', authenticateToken, a
       return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
 
-    // Ottieni tutti gli studenti
     const studentsResult = await pool.query(
       'SELECT id, first_name, last_name FROM students WHERE class_id = $1 ORDER BY last_name, first_name',
       [classId]
     );
 
-    // Ottieni studenti interrogati
     const interrogatedResult = await pool.query(
       'SELECT student_id, extraction_date FROM extraction_history WHERE subject_id = $1 AND class_id = $2',
       [subjectId, classId]
@@ -920,13 +801,9 @@ app.get('/api/classes/:classId/subjects/:subjectId/status', authenticateToken, a
 });
 
 // ============================================
-// ROUTES - CAPOCLASSE (ADMIN)
+// ROUTES - CAPOCLASSE
 // ============================================
 
-/**
- * Assegna capoclasse a classe
- * POST /api/classes/:classId/extractors
- */
 app.post('/api/classes/:classId/extractors', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -936,22 +813,18 @@ app.post('/api/classes/:classId/extractors', authenticateToken, requireAdmin, as
       return res.status(400).json({ error: 'Username e password richiesti' });
     }
 
-    // Verifica che esista la classe
     const classResult = await pool.query('SELECT * FROM classes WHERE id = $1', [classId]);
     if (classResult.rows.length === 0) {
       return res.status(404).json({ error: 'Classe non trovata' });
     }
 
-    // Hash password
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Crea utente capoclasse
     const userResult = await pool.query(
       'INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id, username, role',
       [username, passwordHash, 'capoclasse']
     );
 
-    // Associa alla classe
     await pool.query(
       'INSERT INTO class_extractors (class_id, user_id) VALUES ($1, $2)',
       [classId, userResult.rows[0].id]
@@ -967,10 +840,6 @@ app.post('/api/classes/:classId/extractors', authenticateToken, requireAdmin, as
   }
 });
 
-/**
- * Ottieni capoclasse di una classe
- * GET /api/classes/:classId/extractors
- */
 app.get('/api/classes/:classId/extractors', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -988,10 +857,6 @@ app.get('/api/classes/:classId/extractors', authenticateToken, requireAdmin, asy
   }
 });
 
-/**
- * Rimuovi capoclasse
- * DELETE /api/extractors/:userId
- */
 app.delete('/api/extractors/:userId', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -1007,10 +872,6 @@ app.delete('/api/extractors/:userId', authenticateToken, requireAdmin, async (re
 // ROUTES - STATISTICHE
 // ============================================
 
-/**
- * Dashboard stats
- * GET /api/stats
- */
 app.get('/api/stats', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const stats = await pool.query(`
@@ -1033,10 +894,12 @@ app.get('/api/stats', authenticateToken, requireAdmin, async (req, res) => {
 // SERVIZIO FILE STATICI (PRODUZIONE)
 // ============================================
 if (NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../frontend')));
+  // Servi il frontend dalla cartella public (copiata durante il build)
+  app.use(express.static(path.join(__dirname, 'public')));
   
+  // Per tutte le altre richieste, servi index.html (SPA routing)
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/index.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
   });
 }
 
@@ -1052,9 +915,6 @@ app.use((err, req, res, next) => {
 // UTILITY
 // ============================================
 
-/**
- * Genera codice classe univoco
- */
 function generateClassCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
