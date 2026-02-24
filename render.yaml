@@ -15,12 +15,16 @@ services:
       mountPath: /var/lib/postgresql/data
       sizeGB: 1
 
-  # Backend Node.js
+  # Backend Node.js (serve anche il frontend!)
   - type: web
-    name: gestore-interrogazioni-api
+    name: gestore-interrogazioni
     runtime: node
     plan: free
-    buildCommand: cd backend && npm install
+    buildCommand: |
+      cd backend && npm install
+      # Copia frontend nella cartella public del backend
+      mkdir -p ../backend/public
+      cp -r ../frontend/* ../backend/public/
     startCommand: cd backend && npm start
     envVars:
       - key: NODE_ENV
@@ -33,6 +37,17 @@ services:
         generateValue: true
       - key: PORT
         value: 10000
+      # URL del servizio auth (per il proxy)
+      - key: AUTH_SERVICE_URL
+        fromService:
+          name: gestore-interrogazioni-auth
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      # Credenziali admin (genera hash con: node -e "console.log(require('bcrypt').hashSync('tua-password', 10))")
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD_HASH
+        sync: false  # Imposta manualmente nel dashboard Render
 
   # Auth Service Flask
   - type: web
@@ -52,24 +67,19 @@ services:
         generateValue: true
       - key: JWT_SECRET
         fromService:
-          name: gestore-interrogazioni-api
+          name: gestore-interrogazioni
           type: web
           envVarKey: JWT_SECRET
       - key: ADMIN_USERNAME
         value: admin
       - key: ADMIN_PASSWORD_HASH
-        # Genera con: python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('YourPassword'))"
-        value: $2b$10$YourHashedPasswordHere
-
-  # Frontend Static
-  - type: static
-    name: gestore-interrogazioni
-    plan: free
-    buildCommand: echo "No build needed"
-    staticPublishPath: ./frontend
-    envVars:
-      - key: API_URL
         fromService:
-          name: gestore-interrogazioni-api
+          name: gestore-interrogazioni
+          type: web
+          envVarKey: ADMIN_PASSWORD_HASH
+      # URL del backend per CORS
+      - key: BACKEND_URL
+        fromService:
+          name: gestore-interrogazioni
           type: web
           envVarKey: RENDER_EXTERNAL_URL
